@@ -1,25 +1,27 @@
+use egui::{
+    Color32, FontId, TextEdit, TextFormat,
+    text::{LayoutJob, LayoutSection},
+};
+use pulldown_cmark::{Event, HeadingLevel, Parser, Tag, TextMergeWithOffset};
+use std::ops::Range;
+
 /// We derive Deserialize/Serialize so we can persist app state on shutdown.
 #[derive(serde::Deserialize, serde::Serialize)]
 #[serde(default)] // if we add new fields, give them default values when deserializing old state
-pub struct TemplateApp {
-    // Example stuff:
-    label: String,
-
-    #[serde(skip)] // This how you opt-out of serialization of a field
-    value: f32,
+pub struct App {
+    text: String,
 }
 
-impl Default for TemplateApp {
+impl Default for App {
     fn default() -> Self {
         Self {
             // Example stuff:
-            label: "Hello World!".to_owned(),
-            value: 2.7,
+            text: "Hello World!".to_owned(),
         }
     }
 }
 
-impl TemplateApp {
+impl App {
     /// Called once before the first frame.
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         // This is also where you can customize the look and feel of egui using
@@ -35,7 +37,7 @@ impl TemplateApp {
     }
 }
 
-impl eframe::App for TemplateApp {
+impl eframe::App for App {
     /// Called by the framework to save state before shutdown.
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
         eframe::set_value(storage, eframe::APP_KEY, self);
@@ -66,44 +68,133 @@ impl eframe::App for TemplateApp {
         });
 
         egui::CentralPanel::default().show_inside(ui, |ui| {
-            // The central panel the region left after adding TopPanel's and SidePanel's
-            ui.heading("eframe template");
+            ui.with_layout(
+                egui::Layout::centered_and_justified(egui::Direction::TopDown),
+                |ui| {
+                    let mut layouter = |ui: &egui::Ui,
+                                        buf: &dyn egui::TextBuffer,
+                                        wrap_width: f32| {
+                        let text = String::from(buf.as_str());
 
-            ui.horizontal(|ui| {
-                ui.label("Write something: ");
-                ui.text_edit_singleline(&mut self.label);
-            });
+                        let iterator =
+                            TextMergeWithOffset::new(Parser::new(buf.as_str()).into_offset_iter());
 
-            ui.add(egui::Slider::new(&mut self.value, 0.0..=10.0).text("value"));
-            if ui.button("Increment").clicked() {
-                self.value += 1.0;
-            }
+                        let mut sections = Vec::new();
 
-            ui.separator();
+                        let font_regular = FontId::monospace(14.);
+                        let font_h1 = FontId::monospace(28.);
+                        let font_h2 = FontId::monospace(26.);
+                        let font_h3 = FontId::monospace(24.);
+                        let font_h4 = FontId::monospace(22.);
+                        let font_h5 = FontId::monospace(20.);
+                        let font_h6 = FontId::monospace(18.);
 
-            ui.add(egui::github_link_file!(
-                "https://github.com/emilk/eframe_template/blob/main/",
-                "Source code."
-            ));
+                        let mut debug_events = Vec::new();
 
-            ui.with_layout(egui::Layout::bottom_up(egui::Align::LEFT), |ui| {
-                powered_by_egui_and_eframe(ui);
-                egui::warn_if_debug_build(ui);
-            });
+                        let mut tag_stack = Vec::new();
+
+                        let mut last_end: usize = 0;
+                        for event in iterator {
+                            debug_events.push(event.clone());
+                            match event {
+                                (Event::Start(tag), _) => {
+                                    tag_stack.push(tag);
+                                }
+                                (Event::End(_), _) => {
+                                    tag_stack.pop();
+                                    ()
+                                }
+                                (Event::Text(_), range) => {
+                                    let font = match tag_stack.last() {
+                                        Some(Tag::Heading {
+                                            level: HeadingLevel::H1,
+                                            ..
+                                        }) => &font_h1,
+                                        Some(Tag::Heading {
+                                            level: HeadingLevel::H2,
+                                            ..
+                                        }) => &font_h2,
+                                        Some(Tag::Heading {
+                                            level: HeadingLevel::H3,
+                                            ..
+                                        }) => &font_h3,
+                                        Some(Tag::Heading {
+                                            level: HeadingLevel::H4,
+                                            ..
+                                        }) => &font_h4,
+                                        Some(Tag::Heading {
+                                            level: HeadingLevel::H5,
+                                            ..
+                                        }) => &font_h5,
+                                        Some(Tag::Heading {
+                                            level: HeadingLevel::H6,
+                                            ..
+                                        }) => &font_h6,
+                                        _ => &font_regular,
+                                    };
+
+                                    let color = match tag_stack.last() {
+                                        Some(Tag::Heading { .. }) => Color32::GRAY,
+                                        _ => Color32::WHITE,
+                                    };
+
+                                    if range.start > last_end {
+                                        sections.push(LayoutSection {
+                                            leading_space: 0.0,
+                                            byte_range: Range {
+                                                start: last_end,
+                                                end: range.start,
+                                            },
+                                            format: TextFormat::simple(font.clone(), color),
+                                        })
+                                    }
+                                    last_end = range.end;
+
+                                    sections.push(LayoutSection {
+                                        leading_space: 0.0,
+                                        byte_range: range,
+                                        format: TextFormat::simple(font.clone(), color),
+                                    })
+                                }
+                                _ => (),
+                            }
+                        }
+
+                        if last_end < text.len() {
+                            sections.push(LayoutSection {
+                                leading_space: 0.0,
+                                byte_range: Range {
+                                    start: last_end,
+                                    end: text.len(),
+                                },
+                                format: TextFormat::simple(font_regular, Color32::WHITE),
+                            })
+                        }
+
+                        log::info!("{:#?}", debug_events);
+
+                        let mut layout_job = LayoutJob {
+                            sections,
+                            text,
+                            wrap: egui::text::TextWrapping {
+                                max_width: wrap_width,
+                                ..Default::default()
+                            },
+                            break_on_newline: true,
+                            ..Default::default()
+                        };
+
+                        layout_job.wrap.max_width = wrap_width;
+                        ui.fonts_mut(|f| f.layout_job(layout_job))
+                    };
+
+                    let text_edit = TextEdit::multiline(&mut self.text)
+                        .code_editor()
+                        .layouter(&mut layouter);
+
+                    ui.add(text_edit);
+                },
+            );
         });
     }
-}
-
-fn powered_by_egui_and_eframe(ui: &mut egui::Ui) {
-    ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing.x = 0.0;
-        ui.label("Powered by ");
-        ui.hyperlink_to("egui", "https://github.com/emilk/egui");
-        ui.label(" and ");
-        ui.hyperlink_to(
-            "meshd",
-            "https://github.com/emilk/egui/tree/master/crates/eframe",
-        );
-        ui.label(".");
-    });
 }
