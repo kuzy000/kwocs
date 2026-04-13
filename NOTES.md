@@ -1,7 +1,8 @@
 # TODO
 - [ ] Editor
+  - [ ] Fonts (including bold font)
   - [ ] Full CommonMark support
-  - [ ] Scrolling
+  - [x] Scrolling
 
 - [ ] Google Drive integration
     - [ ] Allow opening public docs without auth
@@ -20,3 +21,13 @@
 - [ ] Internal
   - [ ] Small size build
   - [ ] Check CPU usage
+  - [ ] `layouter` memoization
+
+- [ ] Bugs
+  - [ ] Big spaces before heading
+  - [ ] Scroll
+    - Make big scrollable text
+    - Place caret at the end
+    - Scroll up
+    - Click top panel
+    - Observe flickering / canvas begin shifted

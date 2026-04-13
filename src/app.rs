@@ -1,9 +1,9 @@
-use core::sync;
 use egui::{
-    Color32, FontId, TextEdit, TextFormat,
+    Color32, FontId, Frame, Stroke, TextEdit, TextFormat, Vec2,
     text::{LayoutJob, LayoutSection},
 };
-use pulldown_cmark::{Event, HeadingLevel, Parser, Tag, TextMergeWithOffset};
+use js_sys::Math::pow;
+use pulldown_cmark::{Event, HeadingLevel, Parser, Tag, TagEnd, TextMergeWithOffset};
 use std::ops::Range;
 use std::rc::Rc;
 use std::{cell::RefCell, sync::Arc};
@@ -67,13 +67,12 @@ impl Default for App {
     }
 }
 
-fn layouter(ui: &egui::Ui, buf: &dyn egui::TextBuffer, wrap_width: f32) -> Arc<egui::Galley> {
-    let text = String::from(buf.as_str());
-
-    let iterator = TextMergeWithOffset::new(Parser::new(buf.as_str()).into_offset_iter());
-
-    let mut sections = Vec::new();
-
+fn text_format(
+    heading_level: Option<HeadingLevel>,
+    emphasis: bool,
+    strong: bool,
+    quote_depth: u32,
+) -> TextFormat {
     let font_regular = FontId::monospace(14.);
     let font_h1 = FontId::monospace(28.);
     let font_h2 = FontId::monospace(26.);
@@ -82,83 +81,153 @@ fn layouter(ui: &egui::Ui, buf: &dyn egui::TextBuffer, wrap_width: f32) -> Arc<e
     let font_h5 = FontId::monospace(20.);
     let font_h6 = FontId::monospace(18.);
 
-    let mut tag_stack = Vec::new();
+    let font_id = heading_level.map_or(font_regular, |h| match h {
+        HeadingLevel::H1 => font_h1,
+        HeadingLevel::H2 => font_h2,
+        HeadingLevel::H3 => font_h3,
+        HeadingLevel::H4 => font_h4,
+        HeadingLevel::H5 => font_h5,
+        HeadingLevel::H6 => font_h6,
+    });
+
+    let color = if heading_level.is_some() {
+        Color32::LIGHT_BLUE
+    } else {
+        Color32::WHITE
+    };
+
+    let alpha = 1. - pow(0.5, quote_depth as f64);
+    let alpha = alpha * 0.5;
+
+    let background = Color32::from_rgba_unmultiplied(255, 255, 255, (255. * alpha) as u8);
+
+    let underline = if strong {
+        Stroke { color, width: 1. }
+    } else {
+        Stroke::NONE
+    };
+
+    return TextFormat {
+        font_id,
+        color,
+        background,
+        underline,
+        italics: emphasis,
+        expand_bg: 0.,
+        ..Default::default()
+    };
+}
+
+fn layouter(ui: &egui::Ui, buf: &dyn egui::TextBuffer, wrap_width: f32) -> Arc<egui::Galley> {
+    let text = String::from(buf.as_str());
+
+    let iterator = TextMergeWithOffset::new(Parser::new(buf.as_str()).into_offset_iter());
+
+    let mut sections = Vec::new();
+
+    let mut debug_tags = Vec::new();
+
+    // Dunno if they could really nest. Using the top one
+    let mut heading_stack = Vec::new();
+
+    let mut strong_depth: u32 = 0;
+    let mut emphasis_depth: u32 = 0;
+    let mut quote_depth: u32 = 0;
 
     let mut last_end: usize = 0;
     for event in iterator {
-        match event {
-            (Event::Start(tag), _) => {
-                tag_stack.push(tag);
-            }
-            (Event::End(_), _) => {
-                tag_stack.pop();
-                ()
-            }
-            (Event::Text(_), range) => {
-                let font = match tag_stack.last() {
-                    Some(Tag::Heading {
-                        level: HeadingLevel::H1,
-                        ..
-                    }) => &font_h1,
-                    Some(Tag::Heading {
-                        level: HeadingLevel::H2,
-                        ..
-                    }) => &font_h2,
-                    Some(Tag::Heading {
-                        level: HeadingLevel::H3,
-                        ..
-                    }) => &font_h3,
-                    Some(Tag::Heading {
-                        level: HeadingLevel::H4,
-                        ..
-                    }) => &font_h4,
-                    Some(Tag::Heading {
-                        level: HeadingLevel::H5,
-                        ..
-                    }) => &font_h5,
-                    Some(Tag::Heading {
-                        level: HeadingLevel::H6,
-                        ..
-                    }) => &font_h6,
-                    _ => &font_regular,
-                };
+        debug_tags.push(event.clone());
 
-                let color = match tag_stack.last() {
-                    Some(Tag::Heading { .. }) => Color32::GRAY,
-                    _ => Color32::WHITE,
-                };
+        let text_format = text_format(
+            heading_stack.pop(),
+            emphasis_depth > 0,
+            strong_depth > 0,
+            quote_depth,
+        );
 
-                if range.start > last_end {
-                    sections.push(LayoutSection {
-                        leading_space: 0.0,
-                        byte_range: Range {
-                            start: last_end,
-                            end: range.start,
-                        },
-                        format: TextFormat::simple(font.clone(), color),
-                    })
-                }
-                last_end = range.end;
+        let range = event.1;
 
+        // Close previous range
+        {
+            let current_end = match event.0 {
+                Event::End(_) => range.end,
+                _ => range.start,
+            };
+
+            if current_end > last_end {
                 sections.push(LayoutSection {
                     leading_space: 0.0,
-                    byte_range: range,
-                    format: TextFormat::simple(font.clone(), color),
-                })
+                    byte_range: Range {
+                        start: last_end,
+                        end: current_end,
+                    },
+                    format: text_format.clone(),
+                });
+                last_end = current_end;
+            }
+        }
+
+        match event.0 {
+            Event::Start(Tag::Heading { level, .. }) => {
+                heading_stack.push(level);
+            }
+            Event::End(TagEnd::Heading(_)) => {
+                heading_stack.pop();
+                ()
+            }
+
+            Event::Start(Tag::BlockQuote { .. }) => {
+                quote_depth += 1;
+            }
+            Event::End(TagEnd::BlockQuote(_)) => {
+                quote_depth -= 1;
+            }
+
+            Event::Start(Tag::Strong { .. }) => {
+                strong_depth += 1;
+            }
+            Event::End(TagEnd::Strong) => {
+                strong_depth -= 1;
+            }
+
+            Event::Start(Tag::Emphasis { .. }) => {
+                emphasis_depth += 1;
+            }
+            Event::End(TagEnd::Emphasis) => {
+                emphasis_depth -= 1;
+            }
+
+            Event::Text(_) => {
+                sections.push(LayoutSection {
+                    leading_space: 0.0,
+                    byte_range: range.clone(),
+                    format: text_format,
+                });
+                last_end = range.end;
             }
             _ => (),
         }
     }
 
-    if last_end < text.len() {
-        sections.push(LayoutSection {
-            leading_space: 0.0,
-            byte_range: Range {
-                start: last_end,
-                end: text.len(),
-            },
-            format: TextFormat::simple(font_regular, Color32::WHITE),
-        })
+    log::info!("{:#?}", debug_tags);
+
+    {
+        let text_format = text_format(
+            heading_stack.pop(),
+            emphasis_depth > 0,
+            strong_depth > 0,
+            quote_depth,
+        );
+        if last_end < text.len() {
+            sections.push(LayoutSection {
+                leading_space: 0.0,
+                byte_range: Range {
+                    start: last_end,
+                    end: text.len(),
+                },
+                format: text_format,
+            })
+        }
     }
 
     let mut layout_job = LayoutJob {
@@ -340,16 +409,23 @@ impl eframe::App for App {
             }
         });
 
+        egui::Panel::bottom("botton_panel").show_inside(ui, |ui| {
+            ui.label("Some status");
+        });
+
         egui::CentralPanel::default().show_inside(ui, |ui| {
             ui.with_layout(
                 egui::Layout::centered_and_justified(egui::Direction::TopDown),
                 |ui| {
-                    let layouter = &mut layouter;
-                    let text_edit = TextEdit::multiline(&mut self.text)
-                        .code_editor()
-                        .layouter(layouter);
-
-                    ui.add(text_edit);
+                    egui::ScrollArea::vertical()
+                        .wheel_scroll_multiplier(Vec2::splat(2.))
+                        .show(ui, |ui| {
+                            TextEdit::multiline(&mut self.text)
+                                .code_editor()
+                                .layouter(&mut layouter)
+                                .frame(Frame::new())
+                                .show(ui);
+                        })
                 },
             );
         });
