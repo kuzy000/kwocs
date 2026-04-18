@@ -2,11 +2,16 @@ use egui::{
     Color32, FontId, Frame, Stroke, TextEdit, TextFormat, Vec2,
     text::{LayoutJob, LayoutSection},
 };
-use js_sys::Math::pow;
-use pulldown_cmark::{Event, HeadingLevel, Parser, Tag, TagEnd, TextMergeWithOffset};
+use pulldown_cmark::{
+    CodeBlockKind, Event, HeadingLevel, Parser, Tag, TagEnd, TextMergeWithOffset,
+};
 use std::ops::Range;
 use std::rc::Rc;
 use std::{cell::RefCell, sync::Arc};
+use syntect::{
+    highlighting::{HighlightState, Highlighter, ThemeSet},
+    parsing::{ParseState, SyntaxSet},
+};
 
 use crate::google;
 
@@ -53,6 +58,11 @@ pub struct App {
     async_state: Rc<RefCell<AsyncState>>,
     #[serde(skip)]
     open_url_input: String,
+
+    #[serde(skip)]
+    syntax_set: SyntaxSet,
+    #[serde(skip)]
+    theme_set: ThemeSet,
 }
 
 impl Default for App {
@@ -63,16 +73,13 @@ impl Default for App {
             file_id: None,
             async_state: Rc::new(RefCell::new(AsyncState::default())),
             open_url_input: String::new(),
+            syntax_set: SyntaxSet::load_defaults_newlines(),
+            theme_set: ThemeSet::load_defaults(),
         }
     }
 }
 
-fn text_format(
-    heading_level: Option<HeadingLevel>,
-    emphasis: bool,
-    strong: bool,
-    quote_depth: u32,
-) -> TextFormat {
+fn text_format(heading_level: Option<HeadingLevel>, emphasis: bool, strong: bool) -> TextFormat {
     let font_regular = FontId::monospace(14.);
     let font_h1 = FontId::monospace(28.);
     let font_h2 = FontId::monospace(26.);
@@ -96,11 +103,6 @@ fn text_format(
         Color32::WHITE
     };
 
-    let alpha = 1. - pow(0.5, quote_depth as f64);
-    let alpha = alpha * 0.5;
-
-    let background = Color32::from_rgba_unmultiplied(255, 255, 255, (255. * alpha) as u8);
-
     let underline = if strong {
         Stroke { color, width: 1. }
     } else {
@@ -110,7 +112,6 @@ fn text_format(
     return TextFormat {
         font_id,
         color,
-        background,
         underline,
         italics: emphasis,
         expand_bg: 0.,
@@ -118,7 +119,110 @@ fn text_format(
     };
 }
 
-fn layouter(ui: &egui::Ui, buf: &dyn egui::TextBuffer, wrap_width: f32) -> Arc<egui::Galley> {
+fn code_layout(
+    syntax_set: &SyntaxSet,
+    theme_set: &ThemeSet,
+    sections: &mut Vec<LayoutSection>,
+    language: &str,
+    code: &str,
+    code_range: Range<usize>,
+) {
+    let font_id = FontId::monospace(14.);
+    let color = Color32::WHITE;
+
+    let text_format = TextFormat {
+        font_id,
+        color,
+        expand_bg: 0.,
+        ..Default::default()
+    };
+
+    let Some(syntax) = syntax_set.find_syntax_by_token(language) else {
+        sections.push(LayoutSection {
+            leading_space: 0.0,
+            byte_range: code_range.clone(),
+            format: text_format.clone(),
+        });
+        return;
+    };
+
+    let theme = &theme_set.themes["base16-ocean.dark"];
+    let highlighter = Highlighter::new(theme);
+    let mut highlight_state =
+        HighlightState::new(&highlighter, syntect::parsing::ScopeStack::new());
+    let mut parse_state = ParseState::new(syntax);
+
+    let mut rest = code;
+    let mut last_end = code_range.start;
+    loop {
+        let (line, line_range) = {
+            if let Some(idx) = rest.find('\n') {
+                let (a, b) = rest.split_at(idx + 1); // '\n' included
+                let range = Range {
+                    start: last_end,
+                    end: last_end + a.len(),
+                };
+                last_end = range.end;
+                rest = b;
+                (a, range)
+            } else {
+                let range = Range {
+                    start: last_end,
+                    end: last_end + rest.len(),
+                };
+                (rest, range)
+            }
+        };
+
+        if let Ok(ops) = parse_state.parse_line(line, &syntax_set) {
+            let iter = syntect::highlighting::RangedHighlightIterator::new(
+                &mut highlight_state,
+                &ops[..],
+                line,
+                &highlighter,
+            );
+
+            for (style, s, token_range_in_line) in iter {
+                let syntect::highlighting::Color { r, g, b, a } = style.foreground;
+                let color = Color32::from_rgba_unmultiplied(r, g, b, a);
+                let token_range = Range {
+                    start: line_range.start + token_range_in_line.start,
+                    end: line_range.start + token_range_in_line.end,
+                };
+
+                sections.push(LayoutSection {
+                    leading_space: 0.0,
+                    byte_range: token_range.clone(),
+                    format: TextFormat {
+                        color,
+                        ..text_format.clone()
+                    },
+                });
+
+                log::info!("{:#?}", (style, s, token_range))
+            }
+        } else {
+            sections.push(LayoutSection {
+                leading_space: 0.0,
+                byte_range: line_range.clone(),
+                format: text_format.clone(),
+            });
+        }
+
+        assert!(line_range.end <= code_range.end);
+        if line_range.end >= code_range.end {
+            break;
+        }
+    }
+}
+
+fn layouter(
+    syntax_set: &SyntaxSet,
+    theme_set: &ThemeSet,
+    ui: &egui::Ui,
+    buf: &dyn egui::TextBuffer,
+    wrap_width: f32,
+) -> Arc<egui::Galley> {
     let text = String::from(buf.as_str());
 
     let iterator = TextMergeWithOffset::new(Parser::new(buf.as_str()).into_offset_iter());
@@ -129,20 +233,20 @@ fn layouter(ui: &egui::Ui, buf: &dyn egui::TextBuffer, wrap_width: f32) -> Arc<e
 
     // Dunno if they could really nest. Using the top one
     let mut heading_stack = Vec::new();
+    let mut code_stack = Vec::new();
 
     let mut strong_depth: u32 = 0;
     let mut emphasis_depth: u32 = 0;
-    let mut quote_depth: u32 = 0;
+    let mut _quote_depth: u32 = 0; // TODO: Make a background around quotes
 
     let mut last_end: usize = 0;
     for event in iterator {
         debug_tags.push(event.clone());
 
         let text_format = text_format(
-            heading_stack.pop(),
+            heading_stack.last().copied(),
             emphasis_depth > 0,
             strong_depth > 0,
-            quote_depth,
         );
 
         let range = event.1;
@@ -176,11 +280,19 @@ fn layouter(ui: &egui::Ui, buf: &dyn egui::TextBuffer, wrap_width: f32) -> Arc<e
                 ()
             }
 
+            Event::Start(Tag::CodeBlock(code_block)) => {
+                code_stack.push(code_block.clone());
+            }
+            Event::End(TagEnd::CodeBlock) => {
+                code_stack.pop();
+                ()
+            }
+
             Event::Start(Tag::BlockQuote { .. }) => {
-                quote_depth += 1;
+                _quote_depth += 1;
             }
             Event::End(TagEnd::BlockQuote(_)) => {
-                quote_depth -= 1;
+                _quote_depth -= 1;
             }
 
             Event::Start(Tag::Strong { .. }) => {
@@ -197,12 +309,24 @@ fn layouter(ui: &egui::Ui, buf: &dyn egui::TextBuffer, wrap_width: f32) -> Arc<e
                 emphasis_depth -= 1;
             }
 
-            Event::Text(_) => {
-                sections.push(LayoutSection {
-                    leading_space: 0.0,
-                    byte_range: range.clone(),
-                    format: text_format,
-                });
+            Event::Text(str) => {
+                if let Some(CodeBlockKind::Fenced(language)) = code_stack.last() {
+                    code_layout(
+                        syntax_set,
+                        theme_set,
+                        &mut sections,
+                        language.as_ref(),
+                        str.as_ref(),
+                        range.clone(),
+                    );
+                } else {
+                    sections.push(LayoutSection {
+                        leading_space: 0.0,
+                        byte_range: range.clone(),
+                        format: text_format,
+                    });
+                }
+
                 last_end = range.end;
             }
             _ => (),
@@ -213,11 +337,11 @@ fn layouter(ui: &egui::Ui, buf: &dyn egui::TextBuffer, wrap_width: f32) -> Arc<e
 
     {
         let text_format = text_format(
-            heading_stack.pop(),
+            heading_stack.last().copied(),
             emphasis_depth > 0,
             strong_depth > 0,
-            quote_depth,
         );
+
         if last_end < text.len() {
             sections.push(LayoutSection {
                 leading_space: 0.0,
@@ -420,9 +544,17 @@ impl eframe::App for App {
                     egui::ScrollArea::vertical()
                         .wheel_scroll_multiplier(Vec2::splat(2.))
                         .show(ui, |ui| {
+                            let mut layouter_closure =
+                                |ui: &egui::Ui,
+                                 buf: &dyn egui::TextBuffer,
+                                 wrap_width: f32|
+                                 -> Arc<egui::Galley> {
+                                    layouter(&self.syntax_set, &self.theme_set, ui, buf, wrap_width)
+                                };
+
                             TextEdit::multiline(&mut self.text)
                                 .code_editor()
-                                .layouter(&mut layouter)
+                                .layouter(&mut layouter_closure)
                                 .frame(Frame::new())
                                 .show(ui);
                         })

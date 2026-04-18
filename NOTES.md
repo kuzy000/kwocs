@@ -2,6 +2,7 @@
 - [ ] Editor
   - [ ] Fonts (including bold font)
   - [ ] Full CommonMark support
+  - [ ] Insert spaces on tab
   - [x] Scrolling
 
 - [ ] Google Drive integration
@@ -24,10 +25,10 @@
   - [ ] `layouter` memoization
 
 - [ ] Bugs
-  - [ ] Big spaces before heading
   - [ ] Scroll
     - Make big scrollable text
     - Place caret at the end
     - Scroll up
     - Click top panel
     - Observe flickering / canvas begin shifted
+  - [x] Big spaces before heading
