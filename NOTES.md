@@ -23,6 +23,7 @@
   - [ ] Small size build
   - [ ] Check CPU usage
   - [ ] `layouter` memoization
+  - [ ] Code blocks performance
 
 - [ ] Bugs
   - [ ] Scroll

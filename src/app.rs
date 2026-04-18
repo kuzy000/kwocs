@@ -63,6 +63,8 @@ pub struct App {
     syntax_set: SyntaxSet,
     #[serde(skip)]
     theme_set: ThemeSet,
+    #[serde(skip)]
+    layouter_duration: web_time::Duration,
 }
 
 impl Default for App {
@@ -75,6 +77,7 @@ impl Default for App {
             open_url_input: String::new(),
             syntax_set: SyntaxSet::load_defaults_newlines(),
             theme_set: ThemeSet::load_defaults(),
+            layouter_duration: Default::default(),
         }
     }
 }
@@ -534,7 +537,10 @@ impl eframe::App for App {
         });
 
         egui::Panel::bottom("botton_panel").show_inside(ui, |ui| {
-            ui.label("Some status");
+            ui.label(format!(
+                "Layouter: {}ms",
+                self.layouter_duration.as_secs_f64() * 1000.,
+            ));
         });
 
         egui::CentralPanel::default().show_inside(ui, |ui| {
@@ -549,7 +555,17 @@ impl eframe::App for App {
                                  buf: &dyn egui::TextBuffer,
                                  wrap_width: f32|
                                  -> Arc<egui::Galley> {
-                                    layouter(&self.syntax_set, &self.theme_set, ui, buf, wrap_width)
+                                    let start = web_time::Instant::now();
+                                    let res = layouter(
+                                        &self.syntax_set,
+                                        &self.theme_set,
+                                        ui,
+                                        buf,
+                                        wrap_width,
+                                    );
+                                    self.layouter_duration = start.elapsed();
+
+                                    return res;
                                 };
 
                             TextEdit::multiline(&mut self.text)
