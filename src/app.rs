@@ -1,19 +1,73 @@
 use egui::{
-    Color32, FontId, Frame, Stroke, TextEdit, TextFormat, Vec2,
+    Color32, FontFamily, FontId, Frame, Stroke, TextEdit, TextFormat, Vec2,
+    epaint::text,
+    load::BytesLoadResult,
     text::{LayoutJob, LayoutSection},
 };
 use pulldown_cmark::{
     CodeBlockKind, Event, HeadingLevel, Parser, Tag, TagEnd, TextMergeWithOffset,
 };
-use std::ops::Range;
 use std::rc::Rc;
 use std::{cell::RefCell, sync::Arc};
+use std::{default, ops::Range};
 use syntect::{
     highlighting::{HighlightState, Highlighter, ThemeSet},
     parsing::{ParseState, SyntaxSet},
 };
 
 use crate::google;
+
+const FONT_HEADING: &str = "Heading-Regular";
+const FONT_HEADING_BYTES: &[u8] =
+    include_bytes!("../assets/Noto_Serif/static/NotoSerif-Medium.ttf");
+
+const FONT_HEADING_BOLD: &str = "Heading-Bold";
+const FONT_HEADING_BOLD_BYTES: &[u8] =
+    include_bytes!("../assets/Noto_Serif/static/NotoSerif-MediumItalic.ttf");
+
+const FONT_HEADING_ITALIC: &str = "Heading-Italic";
+const FONT_HEADING_ITALIC_BYTES: &[u8] =
+    include_bytes!("../assets/Noto_Serif/static/NotoSerif-Italic.ttf");
+
+const FONT_HEADING_BOLD_ITALIC: &str = "Heading-BoldItalic";
+const FONT_HEADING_BOLD_ITALIC_BYTES: &[u8] =
+    include_bytes!("../assets/Noto_Serif/static/NotoSerif-BoldItalic.ttf");
+
+const FONT_TEXT: &str = "Text-Regular";
+const FONT_TEXT_BYTES: &[u8] = include_bytes!("../assets/Noto_Sans/static/NotoSans-Regular.ttf");
+
+const FONT_TEXT_BOLD: &str = "Text-Bold";
+const FONT_TEXT_BOLD_BYTES: &[u8] = include_bytes!("../assets/Noto_Sans/static/NotoSans-Bold.ttf");
+
+const FONT_TEXT_ITALIC: &str = "Text-Italic";
+const FONT_TEXT_ITALIC_BYTES: &[u8] =
+    include_bytes!("../assets/Noto_Sans/static/NotoSans-Italic.ttf");
+
+const FONT_TEXT_BOLD_ITALIC: &str = "Text-BoldItalic";
+const FONT_TEXT_BOLD_ITALIC_BYTES: &[u8] =
+    include_bytes!("../assets/Noto_Sans/static/NotoSans-BoldItalic.ttf");
+
+const FONT_CODE: &str = "Code-Regular";
+const FONT_CODE_BYTES: &[u8] =
+    include_bytes!("../assets/Noto_Sans_Mono/static/NotoSansMono-Regular.ttf");
+
+const FONT_CODE_BOLD: &str = "Code-Bold";
+const FONT_CODE_BOLD_BYTES: &[u8] =
+    include_bytes!("../assets/Noto_Sans_Mono/static/NotoSansMono-Bold.ttf");
+
+const FONT_CODE_ITALIC: &str = FONT_CODE;
+
+const FONT_CODE_BOLD_ITALIC: &str = FONT_CODE_BOLD;
+
+const FONT_CODE_HEADING: &str = "CodeHeading-Regular";
+const FONT_CODE_HEADING_BYTES: &[u8] =
+    include_bytes!("../assets/Noto_Sans_Mono/static/NotoSansMono-Medium.ttf");
+
+const FONT_CODE_HEADING_BOLD: &str = FONT_CODE_BOLD;
+
+const FONT_CODE_HEADING_BOLD_ITALIC: &str = FONT_CODE_BOLD_ITALIC;
+
+const FONT_CODE_HEADING_ITALIC: &str = FONT_CODE_HEADING;
 
 struct AsyncState {
     access_token: Option<String>,
@@ -82,41 +136,76 @@ impl Default for App {
     }
 }
 
-fn text_format(heading_level: Option<HeadingLevel>, emphasis: bool, strong: bool) -> TextFormat {
-    let font_regular = FontId::monospace(14.);
-    let font_h1 = FontId::monospace(28.);
-    let font_h2 = FontId::monospace(26.);
-    let font_h3 = FontId::monospace(24.);
-    let font_h4 = FontId::monospace(22.);
-    let font_h5 = FontId::monospace(20.);
-    let font_h6 = FontId::monospace(18.);
+fn text_size(heading_level: Option<HeadingLevel>) -> f32 {
+    match heading_level {
+        Some(HeadingLevel::H1) => 24.,
+        Some(HeadingLevel::H2) => 22.,
+        Some(HeadingLevel::H3) => 20.,
+        Some(HeadingLevel::H4) => 18.,
+        Some(HeadingLevel::H5) => 18.,
+        Some(HeadingLevel::H6) => 18.,
+        None => 16.,
+    }
+}
 
-    let font_id = heading_level.map_or(font_regular, |h| match h {
-        HeadingLevel::H1 => font_h1,
-        HeadingLevel::H2 => font_h2,
-        HeadingLevel::H3 => font_h3,
-        HeadingLevel::H4 => font_h4,
-        HeadingLevel::H5 => font_h5,
-        HeadingLevel::H6 => font_h6,
-    });
+fn text_font_family(heading: bool, code: bool, emphasis: bool, strong: bool) -> FontFamily {
+    let name = match (heading, code, emphasis, strong) {
+        (false, false, false, false) => FONT_TEXT,
+        (false, false, false, true) => FONT_TEXT_BOLD,
+        (false, false, true, false) => FONT_TEXT_ITALIC,
+        (false, false, true, true) => FONT_TEXT_BOLD_ITALIC,
 
-    let color = if heading_level.is_some() {
-        Color32::LIGHT_BLUE
-    } else {
-        Color32::WHITE
+        (false, true, false, false) => FONT_CODE,
+        (false, true, false, true) => FONT_CODE_BOLD,
+        (false, true, true, false) => FONT_CODE_ITALIC,
+        (false, true, true, true) => FONT_CODE_BOLD_ITALIC,
+
+        (true, false, false, false) => FONT_HEADING,
+        (true, false, false, true) => FONT_HEADING_BOLD,
+        (true, false, true, false) => FONT_HEADING_ITALIC,
+        (true, false, true, true) => FONT_HEADING_BOLD_ITALIC,
+
+        (true, true, false, false) => FONT_CODE_HEADING,
+        (true, true, false, true) => FONT_CODE_HEADING_BOLD,
+        (true, true, true, false) => FONT_CODE_HEADING_ITALIC,
+        (true, true, true, true) => FONT_CODE_HEADING_BOLD_ITALIC,
     };
 
-    let underline = if strong {
-        Stroke { color, width: 1. }
-    } else {
-        Stroke::NONE
-    };
+    return FontFamily::Name(name.into());
+}
+
+fn text_format_markup(heading_level: Option<HeadingLevel>) -> TextFormat {
+    let font_size = text_size(heading_level);
+    let font_id = FontId::new(font_size, FontFamily::Name(FONT_CODE.into()));
+    let color = Color32::DARK_GRAY;
 
     return TextFormat {
         font_id,
         color,
-        underline,
-        italics: emphasis,
+        expand_bg: 0.,
+        ..Default::default()
+    };
+}
+
+fn text_format(
+    heading_level: Option<HeadingLevel>,
+    emphasis: bool,
+    strong: bool,
+    code: bool,
+) -> TextFormat {
+    let font_size = text_size(heading_level);
+    let font_id = FontId::new(
+        font_size,
+        text_font_family(heading_level.is_some(), code, emphasis, strong),
+    );
+
+    let italics = code && emphasis; // NotoSansMono doesn't have italics variant
+    let color = Color32::WHITE;
+
+    return TextFormat {
+        font_id,
+        color,
+        italics,
         expand_bg: 0.,
         ..Default::default()
     };
@@ -130,7 +219,7 @@ fn code_layout(
     code: &str,
     code_range: Range<usize>,
 ) {
-    let font_id = FontId::monospace(14.);
+    let font_id = FontId::new(text_size(None), text_font_family(false, true, false, false));
     let color = Color32::WHITE;
 
     let text_format = TextFormat {
@@ -185,7 +274,7 @@ fn code_layout(
                 &highlighter,
             );
 
-            for (style, s, token_range_in_line) in iter {
+            for (style, _str, token_range_in_line) in iter {
                 let syntect::highlighting::Color { r, g, b, a } = style.foreground;
                 let color = Color32::from_rgba_unmultiplied(r, g, b, a);
                 let token_range = Range {
@@ -201,8 +290,6 @@ fn code_layout(
                         ..text_format.clone()
                     },
                 });
-
-                log::info!("{:#?}", (style, s, token_range))
             }
         } else {
             sections.push(LayoutSection {
@@ -228,7 +315,12 @@ fn layouter(
 ) -> Arc<egui::Galley> {
     let text = String::from(buf.as_str());
 
-    let iterator = TextMergeWithOffset::new(Parser::new(buf.as_str()).into_offset_iter());
+    let options = pulldown_cmark::Options::ENABLE_TABLES
+        | pulldown_cmark::Options::ENABLE_TASKLISTS
+        | pulldown_cmark::Options::ENABLE_GFM;
+
+    let iterator =
+        TextMergeWithOffset::new(Parser::new_ext(buf.as_str(), options).into_offset_iter());
 
     let mut sections = Vec::new();
 
@@ -236,21 +328,18 @@ fn layouter(
 
     // Dunno if they could really nest. Using the top one
     let mut heading_stack = Vec::new();
+    heading_stack.push(None); // We have skipping of some headings in which case `None` is pushed
+
     let mut code_stack = Vec::new();
 
     let mut strong_depth: u32 = 0;
     let mut emphasis_depth: u32 = 0;
+    let mut table_depth: u32 = 0;
     let mut _quote_depth: u32 = 0; // TODO: Make a background around quotes
 
     let mut last_end: usize = 0;
     for event in iterator {
         debug_tags.push(event.clone());
-
-        let text_format = text_format(
-            heading_stack.last().copied(),
-            emphasis_depth > 0,
-            strong_depth > 0,
-        );
 
         let range = event.1;
 
@@ -262,13 +351,15 @@ fn layouter(
             };
 
             if current_end > last_end {
+                let format = text_format_markup(heading_stack.last().copied().unwrap_or(None));
+
                 sections.push(LayoutSection {
                     leading_space: 0.0,
                     byte_range: Range {
                         start: last_end,
                         end: current_end,
                     },
-                    format: text_format.clone(),
+                    format,
                 });
                 last_end = current_end;
             }
@@ -276,7 +367,18 @@ fn layouter(
 
         match event.0 {
             Event::Start(Tag::Heading { level, .. }) => {
-                heading_stack.push(level);
+                // I don't like that this is a header. It is just some text before list
+                // HEADER
+                //  -
+                //
+                // Here it should be at least --- to be a header
+                // HEADER
+                //  ---
+                let str = &text[range.start..range.end];
+                let str = str.trim();
+                let skip = !str.starts_with('#') && !str.ends_with("---") && !str.ends_with("===");
+
+                heading_stack.push(if skip { None } else { Some(level) });
             }
             Event::End(TagEnd::Heading(_)) => {
                 heading_stack.pop();
@@ -312,6 +414,13 @@ fn layouter(
                 emphasis_depth -= 1;
             }
 
+            Event::Start(Tag::Table { .. }) => {
+                table_depth += 1;
+            }
+            Event::End(TagEnd::Table) => {
+                table_depth -= 1;
+            }
+
             Event::Text(str) => {
                 if let Some(CodeBlockKind::Fenced(language)) = code_stack.last() {
                     code_layout(
@@ -323,10 +432,70 @@ fn layouter(
                         range.clone(),
                     );
                 } else {
+                    let format = text_format(
+                        heading_stack.last().copied().unwrap_or(None),
+                        emphasis_depth > 0,
+                        strong_depth > 0,
+                        table_depth > 0,
+                    );
+
                     sections.push(LayoutSection {
                         leading_space: 0.0,
                         byte_range: range.clone(),
-                        format: text_format,
+                        format,
+                    });
+                }
+
+                last_end = range.end;
+            }
+            Event::Code(_) => {
+                // Must always be true because "`c`" is a minimum Code sentence
+                if range.len() >= 3 {
+                    let markup = text_format_markup(heading_stack.last().copied().unwrap_or(None));
+                    let format = text_format(
+                        heading_stack.last().copied().unwrap_or(None),
+                        emphasis_depth > 0,
+                        strong_depth > 0,
+                        true,
+                    );
+
+                    sections.push(LayoutSection {
+                        leading_space: 0.0,
+                        byte_range: Range {
+                            start: range.start,
+                            end: range.start + 1,
+                        },
+                        format: markup.clone(),
+                    });
+                    sections.push(LayoutSection {
+                        leading_space: 0.0,
+                        byte_range: Range {
+                            start: range.start + 1,
+                            end: range.end - 1,
+                        },
+                        format,
+                    });
+                    sections.push(LayoutSection {
+                        leading_space: 0.0,
+                        byte_range: Range {
+                            start: range.end - 1,
+                            end: range.end,
+                        },
+                        format: markup,
+                    });
+                } else {
+                    // Fallback
+                    let format = text_format(
+                        heading_stack.last().copied().unwrap_or(None),
+                        emphasis_depth > 0,
+                        strong_depth > 0,
+                        false,
+                    );
+
+                    sections.push(LayoutSection {
+                        leading_space: 0.0,
+                        byte_range: range.clone(),
+                        format,
                     });
                 }
 
@@ -336,14 +505,10 @@ fn layouter(
         }
     }
 
-    log::info!("{:#?}", debug_tags);
+    log::info!("{:#?}", debug_tags); // TODO: remove spam
 
     {
-        let text_format = text_format(
-            heading_stack.last().copied(),
-            emphasis_depth > 0,
-            strong_depth > 0,
-        );
+        let format = text_format_markup(heading_stack.last().copied().unwrap_or(None));
 
         if last_end < text.len() {
             sections.push(LayoutSection {
@@ -352,7 +517,7 @@ fn layouter(
                     start: last_end,
                     end: text.len(),
                 },
-                format: text_format,
+                format: format,
             })
         }
     }
@@ -374,6 +539,35 @@ fn layouter(
 
 impl App {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
+        let mut fonts = egui::FontDefinitions::default();
+
+        let mut add_font = |name: &str, bytes: &'static [u8]| {
+            fonts.font_data.insert(
+                name.to_owned(),
+                Arc::new(egui::FontData::from_static(bytes)),
+            );
+
+            fonts
+                .families
+                .insert(FontFamily::Name(name.into()), vec![name.to_owned()]);
+        };
+
+        add_font(FONT_HEADING, FONT_HEADING_BYTES);
+        add_font(FONT_HEADING_ITALIC, FONT_HEADING_ITALIC_BYTES);
+        add_font(FONT_HEADING_BOLD, FONT_HEADING_BOLD_BYTES);
+        add_font(FONT_HEADING_BOLD_ITALIC, FONT_HEADING_BOLD_ITALIC_BYTES);
+
+        add_font(FONT_TEXT, FONT_TEXT_BYTES);
+        add_font(FONT_TEXT_ITALIC, FONT_TEXT_ITALIC_BYTES);
+        add_font(FONT_TEXT_BOLD, FONT_TEXT_BOLD_BYTES);
+        add_font(FONT_TEXT_BOLD_ITALIC, FONT_TEXT_BOLD_ITALIC_BYTES);
+
+        add_font(FONT_CODE, FONT_CODE_BYTES);
+        add_font(FONT_CODE_BOLD, FONT_CODE_BOLD_BYTES);
+        add_font(FONT_CODE_HEADING, FONT_CODE_HEADING_BYTES);
+
+        cc.egui_ctx.set_fonts(fonts);
+
         if let Some(storage) = cc.storage {
             eframe::get_value(storage, eframe::APP_KEY).unwrap_or_default()
         } else {
@@ -548,7 +742,7 @@ impl eframe::App for App {
                 egui::Layout::centered_and_justified(egui::Direction::TopDown),
                 |ui| {
                     egui::ScrollArea::vertical()
-                        .wheel_scroll_multiplier(Vec2::splat(2.))
+                        .wheel_scroll_multiplier(Vec2::splat(1.5))
                         .show(ui, |ui| {
                             let mut layouter_closure =
                                 |ui: &egui::Ui,

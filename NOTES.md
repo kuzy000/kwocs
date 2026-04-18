@@ -1,8 +1,13 @@
 # TODO
 - [ ] Editor
-  - [ ] Fonts (including bold font)
   - [ ] Full CommonMark support
+    - [ ] Lists
+    - [ ] GitHub-like colors for [!NOTE], [!WARNING] etc
   - [ ] Insert spaces on tab
+  - [ ] Offset selection with tab
+  - [ ] Better Ctrl+Z
+  - [ ] Font rendering is not ideal: compare with browser-native
+  - [x] Fonts (including bold font)
   - [x] Scrolling
 
 - [ ] Google Drive integration
@@ -21,11 +26,15 @@
 
 - [ ] Internal
   - [ ] Small size build
-  - [ ] Check CPU usage
   - [ ] `layouter` memoization
   - [ ] Code blocks performance
+  - [ ] Scroll is different in chrome / firefox
+  - [x] Check CPU usage
 
 - [ ] Bugs
+  - [ ] First time syntax highlighting is too slow
+  - [ ] Firefox and Chrome have different background colors?????
+  - [ ] Big spaces after heading when empty
   - [ ] Scroll
     - Make big scrollable text
     - Place caret at the end
