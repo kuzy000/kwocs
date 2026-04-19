@@ -71,6 +71,9 @@ const FONT_CODE_HEADING_BOLD_ITALIC: &str = FONT_CODE_BOLD_ITALIC;
 
 const FONT_CODE_HEADING_ITALIC: &str = FONT_CODE_HEADING;
 
+const SYNTECT_DARK_BYTES: &[u8] = include_bytes!("../assets/sublime-vscode-plus/Dark+.tmTheme");
+const SYNTECT_LIGHT_BYTES: &[u8] = include_bytes!("../assets/sublime-vscode-plus/Light+.tmTheme");
+
 struct CustomColors {
     fg_regular: Color32,
     fg_markup: Color32,
@@ -146,6 +149,24 @@ pub struct App {
 
 impl Default for App {
     fn default() -> Self {
+        let dark_theme = {
+            let mut cursor = std::io::Cursor::new(SYNTECT_DARK_BYTES);
+            ThemeSet::load_from_reader(&mut cursor).expect("Failed to load default dark theme!")
+        };
+
+        let light_theme = {
+            let mut cursor = std::io::Cursor::new(SYNTECT_LIGHT_BYTES);
+            ThemeSet::load_from_reader(&mut cursor).expect("Failed to load default light theme!")
+        };
+
+        let theme_set = ThemeSet {
+            themes: [
+                ("dark".to_owned(), dark_theme),
+                ("light".to_owned(), light_theme),
+            ]
+            .into(),
+        };
+
         Self {
             text: "Hello World!".to_owned(),
             file_name: "untitled.md".to_owned(),
@@ -153,7 +174,7 @@ impl Default for App {
             async_state: Rc::new(RefCell::new(AsyncState::default())),
             open_url_input: String::new(),
             syntax_set: SyntaxSet::load_defaults_newlines(),
-            theme_set: ThemeSet::load_defaults(),
+            theme_set,
             layouter_duration: Default::default(),
         }
     }
@@ -309,7 +330,12 @@ fn code_layout(
         return;
     };
 
-    let theme = &theme_set.themes["base16-ocean.dark"];
+    let theme = if ui.style().visuals.dark_mode {
+        &theme_set.themes["dark"]
+    } else {
+        &theme_set.themes["light"]
+    };
+
     let highlighter = Highlighter::new(theme);
     let mut highlight_state =
         HighlightState::new(&highlighter, syntect::parsing::ScopeStack::new());

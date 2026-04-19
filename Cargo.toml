@@ -23,6 +23,8 @@ web-sys = { version = "0.3.70", features = [
 ] }
 dotenvy_macro = "0.15.7"
 syntect = { version = "5.3.0", default-features = false, features = [
-    "default-fancy",
+    "default-syntaxes",
+    "plist-load",
+    "regex-fancy",
 ] }
 web-time = "1.1.0"

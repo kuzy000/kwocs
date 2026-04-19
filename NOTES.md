@@ -9,6 +9,8 @@
   - [ ] Font rendering is not ideal: compare with browser-native
   - [ ] `inline code` must be more noticeable
   - [ ] Line numbers
+  - [ ] Prevent Ctrl+W
+  - [ ] Find
   - [x] Add space after headings
   - [x] Fonts (including bold font)
   - [x] Scrolling
@@ -33,6 +35,7 @@
   - [ ] Code blocks performance
   - [ ] Scroll is different in chrome / firefox
   - [ ] Try using variable fonts
+  - [ ] Disable standart fonts
   - [x] Check CPU usage
 
 - [ ] Bugs
