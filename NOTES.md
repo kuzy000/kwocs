@@ -8,6 +8,7 @@
   - [ ] Better Ctrl+Z
   - [ ] Font rendering is not ideal: compare with browser-native
   - [ ] `inline code` must be more noticeable
+  - [ ] Line numbers
   - [x] Add space after headings
   - [x] Fonts (including bold font)
   - [x] Scrolling

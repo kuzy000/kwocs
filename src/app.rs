@@ -1,7 +1,9 @@
+use eframe::wgpu::Color;
 use egui::{
     Color32, FontFamily, FontId, Frame, Stroke, TextEdit, TextFormat, Vec2,
-    epaint::text,
+    epaint::{color, text},
     load::BytesLoadResult,
+    style::Selection,
     text::{LayoutJob, LayoutSection},
 };
 use pulldown_cmark::{
@@ -68,6 +70,27 @@ const FONT_CODE_HEADING_BOLD: &str = FONT_CODE_BOLD;
 const FONT_CODE_HEADING_BOLD_ITALIC: &str = FONT_CODE_BOLD_ITALIC;
 
 const FONT_CODE_HEADING_ITALIC: &str = FONT_CODE_HEADING;
+
+struct CustomColors {
+    fg_regular: Color32,
+    fg_markup: Color32,
+    bg: Color32,
+    bg_extreme: Color32,
+}
+
+const CUSTOM_COLORS_DARK: CustomColors = CustomColors {
+    fg_regular: Color32::from_gray(227),
+    fg_markup: Color32::from_gray(96),
+    bg: Color32::from_gray(19),
+    bg_extreme: Color32::from_gray(36),
+};
+
+const CUSTOM_COLORS_LIGHT: CustomColors = CustomColors {
+    fg_regular: Color32::from_gray(31),
+    fg_markup: Color32::from_gray(160),
+    bg: Color32::from_gray(255),
+    bg_extreme: Color32::from_gray(240),
+};
 
 struct AsyncState {
     access_token: Option<String>,
@@ -203,7 +226,13 @@ fn text_format_markup(ui: &egui::Ui, heading_level: Option<HeadingLevel>) -> Tex
     let line_height = text_line_height(ui, heading_level, font_size, &font_family);
     let font_id = FontId::new(font_size, font_family.clone());
 
-    let color = Color32::DARK_GRAY;
+    let colors = if ui.style().visuals.dark_mode {
+        CUSTOM_COLORS_DARK
+    } else {
+        CUSTOM_COLORS_LIGHT
+    };
+
+    let color = colors.fg_markup;
 
     return TextFormat {
         font_id,
@@ -227,7 +256,14 @@ fn text_format(
     let font_id = FontId::new(font_size, font_family);
 
     let italics = code && emphasis; // NotoSansMono doesn't have italics variant
-    let color = Color32::WHITE;
+
+    let colors = if ui.style().visuals.dark_mode {
+        CUSTOM_COLORS_DARK
+    } else {
+        CUSTOM_COLORS_LIGHT
+    };
+
+    let color = colors.fg_regular;
 
     return TextFormat {
         font_id,
@@ -240,6 +276,7 @@ fn text_format(
 }
 
 fn code_layout(
+    ui: &egui::Ui,
     syntax_set: &SyntaxSet,
     theme_set: &ThemeSet,
     sections: &mut Vec<LayoutSection>,
@@ -248,7 +285,13 @@ fn code_layout(
     code_range: Range<usize>,
 ) {
     let font_id = FontId::new(text_size(None), text_font_family(false, true, false, false));
-    let color = Color32::WHITE;
+
+    let colors = if ui.style().visuals.dark_mode {
+        CUSTOM_COLORS_DARK
+    } else {
+        CUSTOM_COLORS_LIGHT
+    };
+    let color = colors.fg_regular;
 
     let text_format = TextFormat {
         font_id,
@@ -452,6 +495,7 @@ fn layouter(
             Event::Text(str) => {
                 if let Some(CodeBlockKind::Fenced(language)) = code_stack.last() {
                     code_layout(
+                        ui,
                         syntax_set,
                         theme_set,
                         &mut sections,
@@ -571,34 +615,59 @@ fn layouter(
 
 impl App {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
-        let mut fonts = egui::FontDefinitions::default();
+        {
+            let mut fonts = egui::FontDefinitions::default();
 
-        let mut add_font = |name: &str, bytes: &'static [u8]| {
-            fonts.font_data.insert(
-                name.to_owned(),
-                Arc::new(egui::FontData::from_static(bytes)),
-            );
+            let mut add_font = |name: &str, bytes: &'static [u8]| {
+                fonts.font_data.insert(
+                    name.to_owned(),
+                    Arc::new(egui::FontData::from_static(bytes)),
+                );
 
-            fonts
-                .families
-                .insert(FontFamily::Name(name.into()), vec![name.to_owned()]);
-        };
+                fonts
+                    .families
+                    .insert(FontFamily::Name(name.into()), vec![name.to_owned()]);
+            };
 
-        add_font(FONT_HEADING, FONT_HEADING_BYTES);
-        add_font(FONT_HEADING_ITALIC, FONT_HEADING_ITALIC_BYTES);
-        add_font(FONT_HEADING_BOLD, FONT_HEADING_BOLD_BYTES);
-        add_font(FONT_HEADING_BOLD_ITALIC, FONT_HEADING_BOLD_ITALIC_BYTES);
+            add_font(FONT_HEADING, FONT_HEADING_BYTES);
+            add_font(FONT_HEADING_ITALIC, FONT_HEADING_ITALIC_BYTES);
+            add_font(FONT_HEADING_BOLD, FONT_HEADING_BOLD_BYTES);
+            add_font(FONT_HEADING_BOLD_ITALIC, FONT_HEADING_BOLD_ITALIC_BYTES);
 
-        add_font(FONT_TEXT, FONT_TEXT_BYTES);
-        add_font(FONT_TEXT_ITALIC, FONT_TEXT_ITALIC_BYTES);
-        add_font(FONT_TEXT_BOLD, FONT_TEXT_BOLD_BYTES);
-        add_font(FONT_TEXT_BOLD_ITALIC, FONT_TEXT_BOLD_ITALIC_BYTES);
+            add_font(FONT_TEXT, FONT_TEXT_BYTES);
+            add_font(FONT_TEXT_ITALIC, FONT_TEXT_ITALIC_BYTES);
+            add_font(FONT_TEXT_BOLD, FONT_TEXT_BOLD_BYTES);
+            add_font(FONT_TEXT_BOLD_ITALIC, FONT_TEXT_BOLD_ITALIC_BYTES);
 
-        add_font(FONT_CODE, FONT_CODE_BYTES);
-        add_font(FONT_CODE_BOLD, FONT_CODE_BOLD_BYTES);
-        add_font(FONT_CODE_HEADING, FONT_CODE_HEADING_BYTES);
+            add_font(FONT_CODE, FONT_CODE_BYTES);
+            add_font(FONT_CODE_BOLD, FONT_CODE_BOLD_BYTES);
+            add_font(FONT_CODE_HEADING, FONT_CODE_HEADING_BYTES);
 
-        cc.egui_ctx.set_fonts(fonts);
+            cc.egui_ctx.set_fonts(fonts);
+        }
+
+        {
+            let modify_style = |colors: CustomColors, style: &mut egui::Style| {
+                style.visuals.widgets.inactive.fg_stroke.color = colors.fg_regular;
+                style.visuals.widgets.noninteractive.fg_stroke.color = colors.fg_regular;
+
+                style.visuals.extreme_bg_color = colors.bg_extreme;
+                style.visuals.panel_fill = colors.bg;
+                style.visuals.selection = Selection {
+                    bg_fill: colors.fg_regular,
+                    stroke: Stroke::new(1., colors.bg),
+                }
+            };
+
+            cc.egui_ctx
+                .style_mut_of(egui::Theme::Dark, |style: &mut egui::Style| {
+                    modify_style(CUSTOM_COLORS_DARK, style)
+                });
+            cc.egui_ctx
+                .style_mut_of(egui::Theme::Light, |style: &mut egui::Style| {
+                    modify_style(CUSTOM_COLORS_LIGHT, style)
+                });
+        }
 
         if let Some(storage) = cc.storage {
             eframe::get_value(storage, eframe::APP_KEY).unwrap_or_default()
