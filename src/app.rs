@@ -148,6 +148,29 @@ fn text_size(heading_level: Option<HeadingLevel>) -> f32 {
     }
 }
 
+fn text_line_height(
+    ui: &egui::Ui,
+    heading_level: Option<HeadingLevel>,
+    font_size: f32,
+    font_family: &FontFamily,
+) -> f32 {
+    let font_metrics = ui.fonts_mut(|f| {
+        let font = f.fonts.font(font_family);
+        font.styled_metrics(ui.pixels_per_point(), font_size, &Default::default())
+    });
+
+    return font_metrics.row_height
+        + match heading_level {
+            Some(HeadingLevel::H1) => 10.,
+            Some(HeadingLevel::H2) => 8.,
+            Some(HeadingLevel::H3) => 6.,
+            Some(HeadingLevel::H4) => 4.,
+            Some(HeadingLevel::H5) => 4.,
+            Some(HeadingLevel::H6) => 4.,
+            None => 0.,
+        };
+}
+
 fn text_font_family(heading: bool, code: bool, emphasis: bool, strong: bool) -> FontFamily {
     let name = match (heading, code, emphasis, strong) {
         (false, false, false, false) => FONT_TEXT,
@@ -174,30 +197,34 @@ fn text_font_family(heading: bool, code: bool, emphasis: bool, strong: bool) -> 
     return FontFamily::Name(name.into());
 }
 
-fn text_format_markup(heading_level: Option<HeadingLevel>) -> TextFormat {
+fn text_format_markup(ui: &egui::Ui, heading_level: Option<HeadingLevel>) -> TextFormat {
     let font_size = text_size(heading_level);
-    let font_id = FontId::new(font_size, FontFamily::Name(FONT_CODE.into()));
+    let font_family = FontFamily::Name(FONT_CODE.into());
+    let line_height = text_line_height(ui, heading_level, font_size, &font_family);
+    let font_id = FontId::new(font_size, font_family.clone());
+
     let color = Color32::DARK_GRAY;
 
     return TextFormat {
         font_id,
         color,
+        line_height: Some(line_height),
         expand_bg: 0.,
         ..Default::default()
     };
 }
 
 fn text_format(
+    ui: &egui::Ui,
     heading_level: Option<HeadingLevel>,
     emphasis: bool,
     strong: bool,
     code: bool,
 ) -> TextFormat {
     let font_size = text_size(heading_level);
-    let font_id = FontId::new(
-        font_size,
-        text_font_family(heading_level.is_some(), code, emphasis, strong),
-    );
+    let font_family = text_font_family(heading_level.is_some(), code, emphasis, strong);
+    let line_height = text_line_height(ui, heading_level, font_size, &font_family);
+    let font_id = FontId::new(font_size, font_family);
 
     let italics = code && emphasis; // NotoSansMono doesn't have italics variant
     let color = Color32::WHITE;
@@ -206,6 +233,7 @@ fn text_format(
         font_id,
         color,
         italics,
+        line_height: Some(line_height),
         expand_bg: 0.,
         ..Default::default()
     };
@@ -351,7 +379,7 @@ fn layouter(
             };
 
             if current_end > last_end {
-                let format = text_format_markup(heading_stack.last().copied().unwrap_or(None));
+                let format = text_format_markup(ui, heading_stack.last().copied().unwrap_or(None));
 
                 sections.push(LayoutSection {
                     leading_space: 0.0,
@@ -433,6 +461,7 @@ fn layouter(
                     );
                 } else {
                     let format = text_format(
+                        ui,
                         heading_stack.last().copied().unwrap_or(None),
                         emphasis_depth > 0,
                         strong_depth > 0,
@@ -451,8 +480,10 @@ fn layouter(
             Event::Code(_) => {
                 // Must always be true because "`c`" is a minimum Code sentence
                 if range.len() >= 3 {
-                    let markup = text_format_markup(heading_stack.last().copied().unwrap_or(None));
+                    let markup =
+                        text_format_markup(ui, heading_stack.last().copied().unwrap_or(None));
                     let format = text_format(
+                        ui,
                         heading_stack.last().copied().unwrap_or(None),
                         emphasis_depth > 0,
                         strong_depth > 0,
@@ -486,6 +517,7 @@ fn layouter(
                 } else {
                     // Fallback
                     let format = text_format(
+                        ui,
                         heading_stack.last().copied().unwrap_or(None),
                         emphasis_depth > 0,
                         strong_depth > 0,
@@ -508,7 +540,7 @@ fn layouter(
     log::info!("{:#?}", debug_tags); // TODO: remove spam
 
     {
-        let format = text_format_markup(heading_stack.last().copied().unwrap_or(None));
+        let format = text_format_markup(ui, heading_stack.last().copied().unwrap_or(None));
 
         if last_end < text.len() {
             sections.push(LayoutSection {

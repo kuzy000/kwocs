@@ -7,6 +7,8 @@
   - [ ] Offset selection with tab
   - [ ] Better Ctrl+Z
   - [ ] Font rendering is not ideal: compare with browser-native
+  - [ ] `inline code` must be more noticeable
+  - [x] Add space after headings
   - [x] Fonts (including bold font)
   - [x] Scrolling
 
@@ -29,12 +31,15 @@
   - [ ] `layouter` memoization
   - [ ] Code blocks performance
   - [ ] Scroll is different in chrome / firefox
+  - [ ] Try using variable fonts
   - [x] Check CPU usage
 
 - [ ] Bugs
   - [ ] First time syntax highlighting is too slow
   - [ ] Firefox and Chrome have different background colors?????
   - [ ] Big spaces after heading when empty
+  - [ ] Strange carret behaviour: 
+    - Stay at `# Hello ` and try to type `i`
   - [ ] Scroll
     - Make big scrollable text
     - Place caret at the end
