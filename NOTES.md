@@ -13,6 +13,7 @@
   - [ ] Select + scroll isn't working
   - [ ] Carret in headers is too long (because of line height)
   - [ ] Find
+  - [ ] Scroll must be clickable at the edge of the screen
   - [x] Add space after headings
   - [x] Fonts (including bold font)
   - [x] Scrolling

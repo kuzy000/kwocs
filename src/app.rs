@@ -1,17 +1,14 @@
-use eframe::wgpu::Color;
 use egui::{
     Color32, FontFamily, FontId, Frame, Stroke, TextEdit, TextFormat, Vec2,
-    epaint::{color, text},
-    load::BytesLoadResult,
     style::Selection,
     text::{LayoutJob, LayoutSection},
 };
 use pulldown_cmark::{
     CodeBlockKind, Event, HeadingLevel, Parser, Tag, TagEnd, TextMergeWithOffset,
 };
+use std::ops::Range;
 use std::rc::Rc;
 use std::{cell::RefCell, sync::Arc};
-use std::{default, ops::Range};
 use syntect::{
     highlighting::{HighlightState, Highlighter, ThemeSet},
     parsing::{ParseState, SyntaxSet},
@@ -70,6 +67,9 @@ const FONT_CODE_HEADING_BOLD: &str = FONT_CODE_BOLD;
 const FONT_CODE_HEADING_BOLD_ITALIC: &str = FONT_CODE_BOLD_ITALIC;
 
 const FONT_CODE_HEADING_ITALIC: &str = FONT_CODE_HEADING;
+
+const FONT_EMOJI: &str = "Emoji-Regular";
+const FONT_EMOJI_BYTES: &[u8] = include_bytes!("../assets/Noto_Emoji/static/NotoEmoji-Regular.ttf");
 
 const SYNTECT_DARK_BYTES: &[u8] = include_bytes!("../assets/sublime-vscode-plus/Dark+.tmTheme");
 const SYNTECT_LIGHT_BYTES: &[u8] = include_bytes!("../assets/sublime-vscode-plus/Light+.tmTheme");
@@ -421,7 +421,7 @@ fn layouter(
 
     let mut sections = Vec::new();
 
-    let mut debug_tags = Vec::new();
+    let mut _debug_tags = Vec::new();
 
     // Dunno if they could really nest. Using the top one
     let mut heading_stack = Vec::new();
@@ -436,7 +436,7 @@ fn layouter(
 
     let mut last_end: usize = 0;
     for event in iterator {
-        debug_tags.push(event.clone());
+        _debug_tags.push(event.clone());
 
         let range = event.1;
 
@@ -607,7 +607,7 @@ fn layouter(
         }
     }
 
-    log::info!("{:#?}", debug_tags); // TODO: remove spam
+    // log::info!("{:#?}", _debug_tags);
 
     {
         let format = text_format_markup(ui, heading_stack.last().copied().unwrap_or(None));
@@ -650,10 +650,13 @@ impl App {
                     Arc::new(egui::FontData::from_static(bytes)),
                 );
 
-                fonts
-                    .families
-                    .insert(FontFamily::Name(name.into()), vec![name.to_owned()]);
+                fonts.families.insert(
+                    FontFamily::Name(name.into()),
+                    vec![name.to_owned(), FONT_EMOJI.to_owned()],
+                );
             };
+
+            add_font(FONT_EMOJI, FONT_EMOJI_BYTES);
 
             add_font(FONT_HEADING, FONT_HEADING_BYTES);
             add_font(FONT_HEADING_ITALIC, FONT_HEADING_ITALIC_BYTES);
@@ -668,6 +671,17 @@ impl App {
             add_font(FONT_CODE, FONT_CODE_BYTES);
             add_font(FONT_CODE_BOLD, FONT_CODE_BOLD_BYTES);
             add_font(FONT_CODE_HEADING, FONT_CODE_HEADING_BYTES);
+
+            // Default fonts
+            fonts.families.insert(
+                FontFamily::Proportional,
+                vec![FONT_TEXT.to_owned(), FONT_EMOJI.to_owned()],
+            );
+
+            fonts.families.insert(
+                FontFamily::Monospace,
+                vec![FONT_TEXT.to_owned(), FONT_EMOJI.to_owned()],
+            );
 
             cc.egui_ctx.set_fonts(fonts);
         }
