@@ -59,7 +59,7 @@ pub async fn save_file(
     filename: &str,
     file_id: Option<&str>,
 ) -> Result<SaveResult, String> {
-    let boundary = "nonamedocs_boundary";
+    let boundary = "kwocs_boundary";
 
     let metadata = if file_id.is_some() {
         // Update: no name in metadata (keeps existing name unless we want to rename)

@@ -1,9 +1,9 @@
-var cacheName = 'egui-template-pwa';
+var cacheName = 'kwocs-pwa';
 var filesToCache = [
   './',
   './index.html',
-  './nonamedocs.js',
-  './nonamedocs.wasm',
+  './kwocs.js',
+  './kwocs.wasm',
 ];
 
 /* Start the service worker and cache all of the app's content */

@@ -10,6 +10,8 @@
   - [ ] `inline code` must be more noticeable
   - [ ] Line numbers
   - [ ] Prevent Ctrl+W
+  - [ ] Select + scroll isn't working
+  - [ ] Carret in headers is too long (because of line height)
   - [ ] Find
   - [x] Add space after headings
   - [x] Fonts (including bold font)

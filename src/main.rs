@@ -6,7 +6,7 @@ fn main() {
 #[cfg(target_arch = "wasm32")]
 fn main() {
     use eframe::wasm_bindgen::JsCast as _;
-    use nonamedocs::App;
+    use kwocs::App;
 
     eframe::WebLogger::init(log::LevelFilter::Debug).ok();
 
