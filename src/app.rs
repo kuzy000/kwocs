@@ -9,6 +9,9 @@ use pulldown_cmark::{
 use std::ops::Range;
 use std::rc::Rc;
 use std::{cell::RefCell, sync::Arc};
+use syntastica::language_set::{self, LanguageSet};
+use syntastica_highlight::{Highlight, HighlightEvent};
+use syntastica_parsers_git::LanguageSetImpl;
 use syntect::{
     highlighting::{HighlightState, Highlighter, ThemeSet},
     parsing::{ParseState, SyntaxSet},
@@ -145,6 +148,9 @@ pub struct App {
     theme_set: ThemeSet,
     #[serde(skip)]
     layouter_duration: web_time::Duration,
+
+    #[serde(skip)]
+    language_set: LanguageSetImpl,
 }
 
 impl Default for App {
@@ -176,6 +182,7 @@ impl Default for App {
             syntax_set: SyntaxSet::load_defaults_newlines(),
             theme_set,
             layouter_duration: Default::default(),
+            language_set: LanguageSetImpl::new(),
         }
     }
 }
@@ -298,6 +305,7 @@ fn text_format(
 
 fn code_layout(
     ui: &egui::Ui,
+    language_set: &syntastica_parsers_git::LanguageSetImpl,
     syntax_set: &SyntaxSet,
     theme_set: &ThemeSet,
     sections: &mut Vec<LayoutSection>,
@@ -307,11 +315,12 @@ fn code_layout(
 ) {
     let font_id = FontId::new(text_size(None), text_font_family(false, true, false, false));
 
-    let colors = if ui.style().visuals.dark_mode {
-        CUSTOM_COLORS_DARK
+    let (colors, theme) = if ui.style().visuals.dark_mode {
+        (CUSTOM_COLORS_DARK, syntastica_themes::one::dark())
     } else {
-        CUSTOM_COLORS_LIGHT
+        (CUSTOM_COLORS_DARK, syntastica_themes::one::light())
     };
+
     let color = colors.fg_regular;
 
     let text_format = TextFormat {
@@ -321,89 +330,114 @@ fn code_layout(
         ..Default::default()
     };
 
-    let Some(syntax) = syntax_set.find_syntax_by_token(language) else {
-        sections.push(LayoutSection {
-            leading_space: 0.0,
-            byte_range: code_range.clone(),
-            format: text_format.clone(),
-        });
-        return;
-    };
+    let prev_len = sections.len();
 
-    let theme = if ui.style().visuals.dark_mode {
-        &theme_set.themes["dark"]
-    } else {
-        &theme_set.themes["light"]
-    };
-
-    let highlighter = Highlighter::new(theme);
-    let mut highlight_state =
-        HighlightState::new(&highlighter, syntect::parsing::ScopeStack::new());
-    let mut parse_state = ParseState::new(syntax);
-
-    let mut rest = code;
-    let mut last_end = code_range.start;
-    loop {
-        let (line, line_range) = {
-            if let Some(idx) = rest.find('\n') {
-                let (a, b) = rest.split_at(idx + 1); // '\n' included
-                let range = Range {
-                    start: last_end,
-                    end: last_end + a.len(),
-                };
-                last_end = range.end;
-                rest = b;
-                (a, range)
-            } else {
-                let range = Range {
-                    start: last_end,
-                    end: last_end + rest.len(),
-                };
-                (rest, range)
-            }
+    let mut try_highlight = || -> Result<(), syntastica::Error> {
+        let language = match language {
+            "bash" | "sh" => syntastica_parsers_git::Lang::Bash,
+            "c" => syntastica_parsers_git::Lang::C,
+            "cpp" | "c++" => syntastica_parsers_git::Lang::Cpp,
+            "css" => syntastica_parsers_git::Lang::Css,
+            "go" => syntastica_parsers_git::Lang::Go,
+            "html" => syntastica_parsers_git::Lang::Html,
+            "java" => syntastica_parsers_git::Lang::Java,
+            "javascript" | "js" => syntastica_parsers_git::Lang::Javascript,
+            "json" => syntastica_parsers_git::Lang::Json,
+            "kotlin" => syntastica_parsers_git::Lang::Kotlin,
+            "lua" => syntastica_parsers_git::Lang::Lua,
+            "python" | "py" => syntastica_parsers_git::Lang::Python,
+            "rust" | "rs" => syntastica_parsers_git::Lang::Rust,
+            "toml" => syntastica_parsers_git::Lang::Toml,
+            "tsx" => syntastica_parsers_git::Lang::Tsx,
+            "typescript" | "ts" => syntastica_parsers_git::Lang::Typescript,
+            "yaml" | "yml" => syntastica_parsers_git::Lang::Yaml,
+            _ => return Err(syntastica::Error::UnsupportedLanguage(language.to_owned())),
         };
 
-        if let Ok(ops) = parse_state.parse_line(line, &syntax_set) {
-            let iter = syntect::highlighting::RangedHighlightIterator::new(
-                &mut highlight_state,
-                &ops[..],
-                line,
-                &highlighter,
-            );
+        let highlight_config = language_set.get_language(language)?;
 
-            for (style, _str, token_range_in_line) in iter {
-                let syntect::highlighting::Color { r, g, b, a } = style.foreground;
-                let color = Color32::from_rgba_unmultiplied(r, g, b, a);
-                let token_range = Range {
-                    start: line_range.start + token_range_in_line.start,
-                    end: line_range.start + token_range_in_line.end,
-                };
+        let mut highlighter = syntastica_highlight::Highlighter::new();
+        let injection_callback = |_: &str| language_set.get_language(language).ok();
+        let iter =
+            highlighter.highlight(highlight_config, code.as_bytes(), None, injection_callback)?;
 
-                sections.push(LayoutSection {
-                    leading_space: 0.0,
-                    byte_range: token_range.clone(),
-                    format: TextFormat {
-                        color,
-                        ..text_format.clone()
-                    },
-                });
+        let mut comment_depth = 0;
+        let mut style_stack = Vec::new();
+
+        for event in iter {
+            match event? {
+                HighlightEvent::HighlightStart(Highlight(highlight)) => {
+                    let key = syntastica::theme::THEME_KEYS[highlight];
+                    style_stack.push(key);
+
+                    // TODO: Maybe we need to stop using strings here...
+                    if key.starts_with("comment") {
+                        comment_depth += 1;
+                    }
+                }
+                HighlightEvent::HighlightEnd => {
+                    if style_stack
+                        .last()
+                        .map_or(false, |key| key.starts_with("comment"))
+                    {
+                        comment_depth -= 1;
+                    }
+
+                    style_stack.pop();
+                }
+                HighlightEvent::Source { start, end } => {
+                    let style = if comment_depth > 0 {
+                        Some("comment")
+                    } else {
+                        style_stack.last().copied()
+                    };
+
+                    let byte_range = Range {
+                        start: code_range.start + start,
+                        end: code_range.start + end,
+                    };
+
+                    match style.and_then(|key| theme.find_style(key)) {
+                        Some(style) => {
+                            let (r, g, b) = style.color().into_components();
+                            let color = Color32::from_rgb(r, g, b);
+
+                            sections.push(LayoutSection {
+                                leading_space: 0.0,
+                                byte_range,
+                                format: TextFormat {
+                                    color,
+                                    ..text_format.clone()
+                                },
+                            });
+                        }
+                        None => {
+                            sections.push(LayoutSection {
+                                leading_space: 0.0,
+                                byte_range,
+                                format: text_format.clone(),
+                            });
+                        }
+                    }
+                }
             }
-        } else {
-            sections.push(LayoutSection {
-                leading_space: 0.0,
-                byte_range: line_range.clone(),
-                format: text_format.clone(),
-            });
         }
+        Ok(())
+    };
 
-        assert!(line_range.end <= code_range.end);
-        if line_range.end >= code_range.end {
-            break;
-        }
+    if try_highlight().is_err() {
+        sections.truncate(prev_len);
+        // Fallback
+        sections.push(LayoutSection {
+            leading_space: 0.0,
+            byte_range: code_range,
+            format: text_format.clone(),
+        });
     }
 }
 
 fn layouter(
+    language_set: &LanguageSetImpl,
     syntax_set: &SyntaxSet,
     theme_set: &ThemeSet,
     ui: &egui::Ui,
@@ -522,6 +556,7 @@ fn layouter(
                 if let Some(CodeBlockKind::Fenced(language)) = code_stack.last() {
                     code_layout(
                         ui,
+                        language_set,
                         syntax_set,
                         theme_set,
                         &mut sections,
@@ -892,6 +927,7 @@ impl eframe::App for App {
                                  -> Arc<egui::Galley> {
                                     let start = web_time::Instant::now();
                                     let res = layouter(
+                                        &self.language_set,
                                         &self.syntax_set,
                                         &self.theme_set,
                                         ui,
